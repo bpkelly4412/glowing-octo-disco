@@ -23,7 +23,7 @@ module.exports = (logSources, printer) => {
     // add from source that was just removed
     const nextLog = logSources[leastRecentLogWithInfo.logSourceIndex].pop();
     if (nextLog) {
-      logMinHeap.push({ logSourceIndex: leastRecentLogWithInfo.logSourceIndex, nextLog })
+      logMinHeap.push({ logSourceIndex: leastRecentLogWithInfo.logSourceIndex, log: nextLog })
     }
   }
 
