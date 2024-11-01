@@ -24,8 +24,10 @@ function populateHeapFromBuffers(logSourceNeededInHeap, logMinHeap) {
   return true;
 }
 
-let totalSourcesFetched = 0
 let totalPopulateBuffersLoopTime = 0;
+
+let totalPops = 0;
+let bufferPopulatesWithoutMain = 0
 
 async function populateBuffers(ls) {
   // filter out any drained log sources and full buffers before fetching
@@ -33,14 +35,22 @@ async function populateBuffers(ls) {
     const startLoopTime = Date.now();
     populateLoopRuns++;
     if (ls.buffer.length < MAX_BUFFER_SIZE) {
+      const mainLoopRunsPreAwait = mainLoopRuns;
+      totalPops++;
       const log = await ls.logSource.popAsync();
       if (log) {
         ls.buffer.unshift({ logSourceId: ls.id, log });
       } else {
         ls.isDrained = true;
       }
+      if (mainLoopRuns - mainLoopRunsPreAwait === 0) {
+        bufferPopulatesWithoutMain++;
+      }
     }
     totalPopulateBuffersLoopTime += Date.now() - startLoopTime;
+    if (Date.now() - startLoopTime > 1000) {
+      console.log('longer than 1s populate loop')
+    }
     await new Promise(resolve => setTimeout(resolve, 0));  // Yield to the event loop
   }
 }
@@ -113,6 +123,8 @@ module.exports = (logSources, printer) => {
       console.log('mainLoopRuns', mainLoopRuns)
       console.log('ms per main loop', totalMainLoopTime / mainLoopRuns);
       console.log('ms per populate buffer loop', totalPopulateBuffersLoopTime / populateLoopRuns);
+      console.log('totalPops', totalPops)
+      console.log('bufferPopulatesWithoutMain', bufferPopulatesWithoutMain)
       printer.done();
       resolve(console.log("Async sort complete."));
     } catch (err) {
