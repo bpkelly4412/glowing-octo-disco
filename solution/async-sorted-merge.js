@@ -4,12 +4,12 @@ const { Heap } = require('heap-js')
 const { sortLogs } = require('./utils');
 
 const MAX_BUFFER_SIZE = 10;
-let filterCount = 0;
 let waitingBufferCount = 0;
+let mainLoopRuns = 0;
+let populateLoopRuns = 0;
 
 // returns true if heap has log from every active source, returns false otherwise
 function populateHeapFromBuffers(logSourceNeededInHeap, logMinHeap) {
-  // filter out any drained log sources with empty buffers
   if (!logSourceNeededInHeap) {
     return true;
   }
@@ -30,6 +30,7 @@ let totalSourcesFetched = 0
 async function populateBuffers(logSourcesById) {
   // filter out any drained log sources and full buffers before fetching
   while (!Object.values(logSourcesById).every(ls => ls.isDrained)) {
+    populateLoopRuns++;
     if (Object.values(logSourcesById).filter(ls => !ls.isDrained && ls.buffer.length < MAX_BUFFER_SIZE).length > 0) {
       bufferFilterCount++;
       totalSourcesFetched += Object.values(logSourcesById).filter(ls => !ls.isDrained && ls.buffer.length < MAX_BUFFER_SIZE).length
@@ -87,6 +88,7 @@ module.exports = (logSources, printer) => {
       populateBuffers(logSourcesById);
 
       while (!logMinHeap.isEmpty()) {
+        mainLoopRuns++;
         // populate buffers from logSources (no await)
         // populateBuffers(logSourcesById);
 
@@ -109,6 +111,8 @@ module.exports = (logSources, printer) => {
       console.log('bufferFilterCount', bufferFilterCount)
       console.log('sourcePerFetch', totalSourcesFetched / bufferFilterCount)
       console.log('waitingBufferCount', waitingBufferCount)
+      console.log('populateLoopRuns', populateLoopRuns)
+      console.log('mainLoopRuns', mainLoopRuns)
       printer.done();
       resolve(console.log("Async sort complete."));
     } catch (err) {
