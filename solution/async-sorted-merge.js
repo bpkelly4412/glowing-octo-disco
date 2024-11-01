@@ -3,11 +3,12 @@
 const { Heap } = require('heap-js')
 const { sortLogs } = require('./utils')
 
-async function populateHeapWithActiveLogSources(activeLogSourcesWithId, logMinHeap, logCountBySource) {
-  const logs = await Promise.all(activeLogSourcesWithId.map(async ls => {
+async function populateHeapWithActiveLogSources(logSourcesById, logMinHeap) {
+  // filter out any drained log sources before fetching
+  const logs = await Promise.all(Object.values(logSourcesById).filter(ls => !ls.logSource.drained).map(async ls => {
     const log = await ls.logSource.popAsync();
     if (log) {
-      logCountBySource[ls.id]++;
+      logSourcesById[ls.id].numLogsInHeap++;
     }
     return { logSourceId: ls.id, log };
   }));
@@ -15,34 +16,36 @@ async function populateHeapWithActiveLogSources(activeLogSourcesWithId, logMinHe
   const filteredLogs = logs.filter(logWithInfo => !!logWithInfo.log);
 
   logMinHeap.push(...filteredLogs)
-  // filter out any drained log sources
-  activeLogSourcesWithId = activeLogSourcesWithId.filter(ls => !ls.logSource.drained)
 }
 
 module.exports = (logSources, printer) => {
   return new Promise(async (resolve, reject) => {
     try {
       // keep track of active log sources so we don't try to popAsync from an drained log source
-      const activeLogSourcesWithId = logSources.map((ls, i) => ({ id: i, logSource: ls }))
+      const logSourcesById = logSources.reduce((acc, curr, i) => ({
+        [i]: {
+          id: i,
+          buffer: [],
+          logSource: curr,
+          numLogsInHeap: 0
+        },
+        ...acc
+      }), {});
       const logMinHeap = new Heap(sortLogs);
-      // keep count of logs in the heap by log source so we can determine if we need to fetch another round
-      const logCountBySource = activeLogSourcesWithId.reduce((prev, curr) => {
-        prev[curr.id] = 0;
-        return prev;
-      }, {})
+
 
       // initialize heap with the least recent entry from each logSource
-      await populateHeapWithActiveLogSources(activeLogSourcesWithId, logMinHeap, logCountBySource);
+      await populateHeapWithActiveLogSources(logSourcesById, logMinHeap);
 
       while (!logMinHeap.isEmpty()) {
         // remove and print most recent entry from heap, decrement count in heap
         const leastRecentLogWithInfo = logMinHeap.pop();
         printer.print(leastRecentLogWithInfo.log)
-        logCountBySource[leastRecentLogWithInfo.logSourceId]--;
+        logSourcesById[leastRecentLogWithInfo.logSourceId].numLogsInHeap--;
 
         // if there are no remaining entries for the logSource in the heap, then fetch from all logSources again
-        if (logCountBySource[leastRecentLogWithInfo.logSourceId] === 0) {
-          await populateHeapWithActiveLogSources(activeLogSourcesWithId, logMinHeap, logCountBySource);
+        if (logSourcesById[leastRecentLogWithInfo.logSourceId].numLogsInHeap === 0) {
+          await populateHeapWithActiveLogSources(logSourcesById, logMinHeap);
         }
       }
 
