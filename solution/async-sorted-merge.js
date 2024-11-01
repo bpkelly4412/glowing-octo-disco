@@ -24,25 +24,23 @@ function populateHeapFromBuffers(logSourceNeededInHeap, logMinHeap) {
   return true;
 }
 
-let bufferFilterCount = 0;
 let totalSourcesFetched = 0
+let totalPopulateBuffersLoopTime = 0;
 
-async function populateBuffers(logSourcesById) {
+async function populateBuffers(ls) {
   // filter out any drained log sources and full buffers before fetching
-  while (!Object.values(logSourcesById).every(ls => ls.isDrained)) {
+  while (!ls.isDrained) {
+    const startLoopTime = Date.now();
     populateLoopRuns++;
-    if (Object.values(logSourcesById).filter(ls => !ls.isDrained && ls.buffer.length < MAX_BUFFER_SIZE).length > 0) {
-      bufferFilterCount++;
-      totalSourcesFetched += Object.values(logSourcesById).filter(ls => !ls.isDrained && ls.buffer.length < MAX_BUFFER_SIZE).length
-      await Promise.all(Object.values(logSourcesById).filter(ls => !ls.isDrained && ls.buffer.length < MAX_BUFFER_SIZE).map(async ls => {
-        const log = await ls.logSource.popAsync();
-        if (log) {
-          logSourcesById[ls.id].buffer.unshift({ logSourceId: ls.id, log });
-        } else {
-          logSourcesById[ls.id].isDrained = true;
-        }
-      }));
+    if (ls.buffer.length < MAX_BUFFER_SIZE) {
+      const log = await ls.logSource.popAsync();
+      if (log) {
+        ls.buffer.unshift({ logSourceId: ls.id, log });
+      } else {
+        ls.isDrained = true;
+      }
     }
+    totalPopulateBuffersLoopTime += Date.now() - startLoopTime;
     await new Promise(resolve => setTimeout(resolve, 0));  // Yield to the event loop
   }
 }
@@ -63,7 +61,7 @@ async function populateHeapWithActiveLogSources(logSourcesById, logMinHeap) {
 
   logMinHeap.push(...filteredLogs)
 }
-
+let totalMainLoopTime = 0;
 module.exports = (logSources, printer) => {
   return new Promise(async (resolve, reject) => {
     try {
@@ -85,10 +83,11 @@ module.exports = (logSources, printer) => {
       // initialize heap with the least recent entry from each logSource
       await populateHeapWithActiveLogSources(logSourcesById, logMinHeap);
 
-      populateBuffers(logSourcesById);
+      Object.values(logSourcesById).forEach(ls => populateBuffers(ls));
 
       while (!logMinHeap.isEmpty()) {
         mainLoopRuns++;
+        const startLoopTime = Date.now();
         // populate buffers from logSources (no await)
         // populateBuffers(logSourcesById);
 
@@ -105,14 +104,15 @@ module.exports = (logSources, printer) => {
             logSourceIdNeededInHeap = -1;
           }
         }
+        totalMainLoopTime += Date.now() - startLoopTime;
         await new Promise(resolve => setTimeout(resolve, 0));  // Yield to the event loop
       }
 
-      console.log('bufferFilterCount', bufferFilterCount)
-      console.log('sourcePerFetch', totalSourcesFetched / bufferFilterCount)
       console.log('waitingBufferCount', waitingBufferCount)
       console.log('populateLoopRuns', populateLoopRuns)
       console.log('mainLoopRuns', mainLoopRuns)
+      console.log('ms per main loop', totalMainLoopTime / mainLoopRuns);
+      console.log('ms per populate buffer loop', totalPopulateBuffersLoopTime / populateLoopRuns);
       printer.done();
       resolve(console.log("Async sort complete."));
     } catch (err) {
