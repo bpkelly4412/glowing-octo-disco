@@ -3,9 +3,11 @@
 const { Heap } = require('heap-js')
 const { sortLogs } = require('./utils')
 
+const MAX_BUFFER_SIZE = 10;
+
 async function populateHeapWithActiveLogSources(logSourcesById, logMinHeap) {
-  // filter out any drained log sources before fetching
-  const logs = await Promise.all(Object.values(logSourcesById).filter(ls => !ls.logSource.drained).map(async ls => {
+  // filter out any drained log sources and full buffers before fetching
+  const logs = await Promise.all(Object.values(logSourcesById).filter(ls => !ls.logSource.drained && ls.numLogsInHeap < MAX_BUFFER_SIZE).map(async ls => {
     const log = await ls.logSource.popAsync();
     if (log) {
       logSourcesById[ls.id].numLogsInHeap++;
