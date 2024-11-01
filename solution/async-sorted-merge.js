@@ -31,27 +31,26 @@ let bufferPopulatesWithoutMain = 0
 
 async function populateBuffers(ls) {
   // filter out any drained log sources and full buffers before fetching
-  while (!ls.isDrained) {
-    const startLoopTime = Date.now();
-    populateLoopRuns++;
-    if (ls.buffer.length < MAX_BUFFER_SIZE) {
-      const mainLoopRunsPreAwait = mainLoopRuns;
-      totalPops++;
-      const log = await ls.logSource.popAsync();
-      if (log) {
-        ls.buffer.unshift({ logSourceId: ls.id, log });
-      } else {
-        ls.isDrained = true;
-      }
-      if (mainLoopRuns - mainLoopRunsPreAwait === 0) {
-        bufferPopulatesWithoutMain++;
-      }
+  const startLoopTime = Date.now();
+  populateLoopRuns++;
+  if (ls.buffer.length + ls.activeRequests < MAX_BUFFER_SIZE) {
+    ls.activeRequests++;
+    const mainLoopRunsPreAwait = mainLoopRuns;
+    totalPops++;
+    const log = await ls.logSource.popAsync();
+    if (log) {
+      ls.buffer.unshift({ logSourceId: ls.id, log });
+    } else {
+      ls.isDrained = true;
     }
-    totalPopulateBuffersLoopTime += Date.now() - startLoopTime;
-    if (Date.now() - startLoopTime > 1000) {
-      console.log('longer than 1s populate loop')
+    ls.activeRequests--;
+    if (mainLoopRuns - mainLoopRunsPreAwait === 0) {
+      bufferPopulatesWithoutMain++;
     }
-    await new Promise(resolve => setTimeout(resolve, 0));  // Yield to the event loop
+  }
+  totalPopulateBuffersLoopTime += Date.now() - startLoopTime;
+  if (Date.now() - startLoopTime > 1000) {
+    console.log('longer than 1s populate loop')
   }
 }
 
@@ -82,7 +81,8 @@ module.exports = (logSources, printer) => {
           buffer: [],
           logSource: curr,
           numLogsInHeap: 0,
-          isDrained: false
+          isDrained: false,
+          activeRequests: 0,
         },
         ...acc
       }), {});
@@ -93,13 +93,12 @@ module.exports = (logSources, printer) => {
       // initialize heap with the least recent entry from each logSource
       await populateHeapWithActiveLogSources(logSourcesById, logMinHeap);
 
-      Object.values(logSourcesById).forEach(ls => populateBuffers(ls));
 
       while (!logMinHeap.isEmpty()) {
+        Object.values(logSourcesById).forEach(ls => populateBuffers(ls));
         mainLoopRuns++;
         const startLoopTime = Date.now();
         // populate buffers from logSources (no await)
-        // populateBuffers(logSourcesById);
 
         // populate heap from buffers for any logs without entries in heap
         if (populateHeapFromBuffers(logSourcesById[logSourceIdNeededInHeap], logMinHeap)) {
